@@ -1,4 +1,3 @@
 streamlit
-pytesseract
-pdf2image
-pillow
+PyMuPDF
+Pillow
