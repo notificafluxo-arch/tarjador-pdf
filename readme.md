@@ -1,12 +1,9 @@
-# 🕵️‍♂️ Tarjador LGPD (Streamlit)
+# Tarjador de CPF / RG (LGPD)
 
-Aplicação web para ocultar automaticamente CPFs e Rgs em PDFs digitalizados.
+Aplicação Flask para remover automaticamente dados sensíveis (CPF e RG) de PDFs.
 
-Hospedagem gratuita via [Streamlit Cloud](https://streamlit.io/cloud).
+## Como executar localmente
 
-**Desenvolvido em Python 3.10+**
-
-## Instalação local
 ```bash
 pip install -r requirements.txt
-streamlit run app.py
+python app_pdf.py
