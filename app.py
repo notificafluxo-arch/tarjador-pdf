@@ -1,14 +1,15 @@
 import re
+import os
+import uuid
 from io import BytesIO
 from flask import Flask, request, send_file, render_template_string
 from pdf2image import convert_from_path
 from PIL import Image, ImageDraw
 import pytesseract
-import os
 
 app = Flask(__name__)
 
-# Tesseract será localizado automaticamente no ambiente do Render
+# Localização do Tesseract (deve estar no PATH do servidor)
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
 # Regexs de CPF e RG
@@ -41,7 +42,7 @@ def aplicar_tarjas_na_imagem(img: Image.Image, ignorar_chars: str) -> Image.Imag
 
         # detecta CPF (11 dígitos, não confundir com CNPJ)
         is_cpf = len(norm) == 11
-        # detecta RG (7 a 9 dígitos, normalmente sem padrão fixo)
+        # detecta RG (7 a 9 dígitos)
         is_rg = 7 <= len(norm) <= 9
 
         if is_cpf or is_rg:
@@ -95,8 +96,8 @@ def index():
             return "Nenhum arquivo enviado", 400
 
         ignorar_chars = request.form.get("ignorar", "-,/\\º:@")
-
-        temp_in_path = "temp_input.pdf"
+        # Nome único para cada upload
+        temp_in_path = f"temp_input_{uuid.uuid4().hex}.pdf"
         arquivo.save(temp_in_path)
 
         try:
@@ -107,7 +108,6 @@ def index():
 
         imagens_processadas = []
         for idx, img in enumerate(images, start=1):
-            print(f"Processando página {idx}...")
             img_rgb = img.convert("RGB")
             img_tarjada = aplicar_tarjas_na_imagem(img_rgb, ignorar_chars)
             imagens_processadas.append(img_tarjada)
@@ -122,4 +122,4 @@ def index():
     return render_template_string(html)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
