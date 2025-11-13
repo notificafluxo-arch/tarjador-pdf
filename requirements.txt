@@ -1,6 +1,4 @@
-Flask
-pdf2image
-pillow
-pytesseract
-PyMuPDF
-poppler-utils
+Flask==2.3.3
+pdf2image==1.16.3
+Pillow==10.1.0
+pytesseract==0.3.10
