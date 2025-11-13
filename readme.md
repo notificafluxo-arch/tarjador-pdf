@@ -1,9 +1,17 @@
-# Tarjador de CPF / RG (LGPD)
+# Tarjador de PDFs (LGPD)
 
-Aplicação Flask para remover automaticamente dados sensíveis (CPF e RG) de PDFs.
+Aplicativo Flask para aplicar tarjas automáticas em CPFs e RGs de PDFs digitalizados.
 
-## Como executar localmente
+## Como usar
 
-```bash
-pip install -r requirements.txt
-python app_pdf.py
+1. Suba o repositório no Render ou outro serviço.
+2. O aplicativo web permitirá enviar PDFs e baixar a versão tarjada.
+3. Você pode definir caracteres a serem ignorados na tarja.
+
+## Dependências
+
+- Flask
+- pdf2image
+- Pillow
+- pytesseract
+- Tesseract OCR instalado no PATH
