@@ -8,8 +8,8 @@ import os
 
 app = Flask(__name__)
 
-# Caminho do executável do Tesseract (ajuste se necessário)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Tesseract será localizado automaticamente no ambiente do Render
+pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
 # Regexs de CPF e RG
 CPF_REGEX = re.compile(r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b')
@@ -83,7 +83,7 @@ def index():
           <br><br>
           <button type="submit">Processar e baixar</button>
         </form>
-        <p class="note">Obs: processamento pode demorar alguns segundos dependendo do tamanho do PDF.</p>
+        <p class="note">Obs: o processamento pode demorar alguns segundos dependendo do tamanho do PDF.</p>
       </div>
     </body>
     </html>
@@ -122,4 +122,4 @@ def index():
     return render_template_string(html)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
