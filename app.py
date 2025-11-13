@@ -1,76 +1,125 @@
-import streamlit as st
-import fitz  # PyMuPDF
-import io
-from PIL import Image, ImageDraw
 import re
+from io import BytesIO
+from flask import Flask, request, send_file, render_template_string
+from pdf2image import convert_from_path
+from PIL import Image, ImageDraw
+import pytesseract
+import os
 
-st.set_page_config(page_title="Tarjador de PDF", page_icon="🕵️", layout="wide")
+app = Flask(__name__)
 
-st.title("🕵️ Tarjador Inteligente de PDFs")
+# Caminho do executável do Tesseract (ajuste se necessário)
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-st.markdown("Envie um PDF e o sistema aplicará tarjas automáticas em CPFs, RGs e outros padrões confidenciais.")
+# Regexs de CPF e RG
+CPF_REGEX = re.compile(r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b')
+RG_REGEX = re.compile(r'\b([A-Z]{2}-)?\d{1,2}\.?\d{3}\.?\d{3}-?\d?\b', re.IGNORECASE)
 
-# Campo para ignorar caracteres
-ignored_chars = st.text_input("Caracteres a serem ignorados (não tarjar):", "-, /, \\ , º, :, @")
-ignored_set = set([c.strip() for c in ignored_chars.split(",") if c.strip()])
+def apenas_digitos(s: str) -> str:
+    return re.sub(r'\D', '', s or '')
 
-uploaded_file = st.file_uploader("📄 Envie um arquivo PDF", type=["pdf"])
+def aplicar_tarjas_na_imagem(img: Image.Image, ignorar_chars: str) -> Image.Image:
+    draw = ImageDraw.Draw(img)
+    try:
+        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT, lang='por')
+    except Exception:
+        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
 
-if uploaded_file:
-    pdf_bytes = uploaded_file.read()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    output_pdf = fitz.open()
+    n_boxes = len(data['level'])
+    for i in range(n_boxes):
+        text = (data['text'][i] or "").strip()
+        if not text:
+            continue
 
-    total_trejados = 0
+        # ignora se contiver algum caractere digitado pelo usuário
+        if any(ch in text for ch in ignorar_chars):
+            continue
 
-    # Expressões regulares para detectar CPFs e RGs
-    patterns = [
-        r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b",  # CPF
-        r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b",  # RG com pontos
-        r"\b\d{7,9}\b"                     # RG numérico simples
-    ]
+        norm = apenas_digitos(text)
+        if not norm.isdigit():
+            continue
 
-    for page_num in range(len(doc)):
-        page = doc.load_page(page_num)
-        pix = page.get_pixmap()
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        # detecta CPF (11 dígitos, não confundir com CNPJ)
+        is_cpf = len(norm) == 11
+        # detecta RG (7 a 9 dígitos, normalmente sem padrão fixo)
+        is_rg = 7 <= len(norm) <= 9
 
-        # Texto da página para identificar padrões
-        text = page.get_text("text")
+        if is_cpf or is_rg:
+            x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+            margem_x = int(w * 0.15)
+            margem_y = int(h * 0.3)
+            box = [x - margem_x, y - margem_y, x + w + margem_x, y + h + margem_y]
+            draw.rectangle(box, fill="black")
 
-        # Aplica regex para encontrar padrões
-        for pattern in patterns:
-            for match in re.finditer(pattern, text):
-                encontrado = match.group()
+    return img
 
-                # Ignorar se contiver algum dos caracteres escolhidos
-                if any(ch in encontrado for ch in ignored_set):
-                    continue
+@app.route("/", methods=["GET", "POST"])
+def index():
+    html = """
+    <!doctype html>
+    <html lang="pt-BR">
+    <head>
+    <meta charset="utf-8">
+    <title>Tarjador LGPD</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f4f4f4; color: #333; padding: 30px; }
+      .container { max-width: 650px; margin: auto; background: #fff; padding: 25px 30px; border-radius: 10px;
+                   box-shadow: 0 0 15px rgba(0,0,0,0.1); }
+      h2 { color: #004080; text-align: center; }
+      input[type="file"], input[type="text"] { width: 100%; padding: 10px; margin: 10px 0; }
+      button { background-color: #004080; color: #fff; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+      button:hover { background-color: #0059b3; }
+      p.note { color: gray; font-size: 0.9em; text-align: center; }
+    </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Tarjador de CPF / RG (LGPD)</h2>
+        <form method="post" enctype="multipart/form-data">
+          <p>Selecione um PDF:</p>
+          <input type="file" name="file" accept="application/pdf" required>
+          <label>Caracteres a serem ignorados (ex: - , / \\ º : @):</label>
+          <input type="text" name="ignorar" value="-,/\\\\º:@">
+          <br><br>
+          <button type="submit">Processar e baixar</button>
+        </form>
+        <p class="note">Obs: processamento pode demorar alguns segundos dependendo do tamanho do PDF.</p>
+      </div>
+    </body>
+    </html>
+    """
 
-                # Localizar posição visual do texto
-                areas = page.search_for(encontrado)
-                for rect in areas:
-                    total_trejados += 1
-                    draw = ImageDraw.Draw(img)
-                    draw.rectangle(
-                        [(rect.x0, rect.y0), (rect.x1, rect.y1)],
-                        fill="black"
-                    )
+    if request.method == "POST":
+        arquivo = request.files.get("file")
+        if not arquivo:
+            return "Nenhum arquivo enviado", 400
 
-        # Converte imagem modificada de volta para PDF
-        img_bytes = io.BytesIO()
-        img.save(img_bytes, format="PDF")
-        temp_doc = fitz.open("pdf", img_bytes.getvalue())
-        output_pdf.insert_pdf(temp_doc)
+        ignorar_chars = request.form.get("ignorar", "-,/\\º:@")
 
-    # Exporta PDF final
-    output_buffer = io.BytesIO()
-    output_pdf.save(output_buffer)
-    st.success(f"✅ PDF processado com sucesso! {total_trejados} áreas tarjadas.")
+        temp_in_path = "temp_input.pdf"
+        arquivo.save(temp_in_path)
 
-    st.download_button(
-        label="⬇️ Baixar PDF Tarjado",
-        data=output_buffer.getvalue(),
-        file_name="tarjado.pdf",
-        mime="application/pdf"
-    )
+        try:
+            images = convert_from_path(temp_in_path, dpi=300)
+        except Exception as e:
+            os.remove(temp_in_path)
+            return f"Erro ao converter PDF: {e}", 500
+
+        imagens_processadas = []
+        for idx, img in enumerate(images, start=1):
+            print(f"Processando página {idx}...")
+            img_rgb = img.convert("RGB")
+            img_tarjada = aplicar_tarjas_na_imagem(img_rgb, ignorar_chars)
+            imagens_processadas.append(img_tarjada)
+
+        output_bytes = BytesIO()
+        imagens_processadas[0].save(output_bytes, format="PDF", save_all=True, append_images=imagens_processadas[1:])
+        output_bytes.seek(0)
+        os.remove(temp_in_path)
+
+        return send_file(output_bytes, download_name="documento_tarjado.pdf", as_attachment=True, mimetype="application/pdf")
+
+    return render_template_string(html)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
