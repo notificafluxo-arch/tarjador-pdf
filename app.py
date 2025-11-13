@@ -1,64 +1,76 @@
-import re
-import os
-import pytesseract
 import streamlit as st
-from pdf2image import convert_from_bytes
+import fitz  # PyMuPDF
+import io
 from PIL import Image, ImageDraw
-from io import BytesIO
+import re
 
-# Caminho do Tesseract local (apenas se estiver rodando offline)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+st.set_page_config(page_title="Tarjador de PDF", page_icon="🕵️", layout="wide")
 
-# Regex para CPF e RG
-CPF_REGEX = re.compile(r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b')
-RG_REGEX = re.compile(r'\b([A-Z]{2}-)?\d{1,2}\.?\d{3}\.?\d{3}-?\d?\b', re.IGNORECASE)
+st.title("🕵️ Tarjador Inteligente de PDFs")
 
-def apenas_digitos(s: str) -> str:
-    return re.sub(r'\D', '', s or '')
+st.markdown("Envie um PDF e o sistema aplicará tarjas automáticas em CPFs, RGs e outros padrões confidenciais.")
 
-def aplicar_tarjas_na_imagem(img: Image.Image, ignorar_chars: str) -> Image.Image:
-    draw = ImageDraw.Draw(img)
-    data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT, lang='por')
+# Campo para ignorar caracteres
+ignored_chars = st.text_input("Caracteres a serem ignorados (não tarjar):", "-, /, \\ , º, :, @")
+ignored_set = set([c.strip() for c in ignored_chars.split(",") if c.strip()])
 
-    for i in range(len(data['level'])):
-        text = (data['text'][i] or "").strip()
-        if not text:
-            continue
-        if any(c in text for c in ignorar_chars):
-            continue  # ignora se contiver caractere bloqueado
+uploaded_file = st.file_uploader("📄 Envie um arquivo PDF", type=["pdf"])
 
-        norm = apenas_digitos(text)
-        is_cpf = bool(CPF_REGEX.search(text)) or (len(norm) == 11 and norm.isdigit())
-        is_rg = bool(RG_REGEX.search(text)) or (7 <= len(norm) <= 9 and norm.isdigit())
+if uploaded_file:
+    pdf_bytes = uploaded_file.read()
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    output_pdf = fitz.open()
 
-        if is_cpf or is_rg:
-            x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-            draw.rectangle([x, y, x + w, y + h], fill="black")
-    return img
+    total_trejados = 0
 
+    # Expressões regulares para detectar CPFs e RGs
+    patterns = [
+        r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b",  # CPF
+        r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b",  # RG com pontos
+        r"\b\d{7,9}\b"                     # RG numérico simples
+    ]
 
-st.set_page_config(page_title="Tarjador LGPD", page_icon="🕵️‍♂️", layout="centered")
-st.title("🕵️‍♂️ Tarjador LGPD - CPF / RG")
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        pix = page.get_pixmap()
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
 
-uploaded_file = st.file_uploader("Selecione um arquivo PDF", type=["pdf"])
-ignorar_chars = st.text_input("Caracteres a ignorar durante a varredura (ex: - , / \\ º : @)", "-,/:\\º:@")
+        # Texto da página para identificar padrões
+        text = page.get_text("text")
 
-if uploaded_file is not None:
-    if st.button("Processar PDF"):
-        with st.spinner("Processando, aguarde..."):
-            try:
-                images = convert_from_bytes(uploaded_file.read(), dpi=300)
-                imgs_processadas = []
-                for idx, img in enumerate(images, start=1):
-                    st.write(f"Página {idx} processada.")
-                    img_rgb = img.convert("RGB")
-                    img_tarjada = aplicar_tarjas_na_imagem(img_rgb, ignorar_chars)
-                    imgs_processadas.append(img_tarjada)
+        # Aplica regex para encontrar padrões
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                encontrado = match.group()
 
-                output = BytesIO()
-                imgs_processadas[0].save(output, format="PDF", save_all=True, append_images=imgs_processadas[1:])
-                output.seek(0)
-                st.success("✅ PDF processado com sucesso!")
-                st.download_button("📥 Baixar PDF Tarjado", output, file_name="documento_tarjado.pdf")
-            except Exception as e:
-                st.error(f"Erro: {e}")
+                # Ignorar se contiver algum dos caracteres escolhidos
+                if any(ch in encontrado for ch in ignored_set):
+                    continue
+
+                # Localizar posição visual do texto
+                areas = page.search_for(encontrado)
+                for rect in areas:
+                    total_trejados += 1
+                    draw = ImageDraw.Draw(img)
+                    draw.rectangle(
+                        [(rect.x0, rect.y0), (rect.x1, rect.y1)],
+                        fill="black"
+                    )
+
+        # Converte imagem modificada de volta para PDF
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PDF")
+        temp_doc = fitz.open("pdf", img_bytes.getvalue())
+        output_pdf.insert_pdf(temp_doc)
+
+    # Exporta PDF final
+    output_buffer = io.BytesIO()
+    output_pdf.save(output_buffer)
+    st.success(f"✅ PDF processado com sucesso! {total_trejados} áreas tarjadas.")
+
+    st.download_button(
+        label="⬇️ Baixar PDF Tarjado",
+        data=output_buffer.getvalue(),
+        file_name="tarjado.pdf",
+        mime="application/pdf"
+    )
