@@ -1,3 +1,6 @@
-streamlit
+Flask
+pdf2image
+pillow
+pytesseract
 PyMuPDF
-Pillow
+poppler-utils
